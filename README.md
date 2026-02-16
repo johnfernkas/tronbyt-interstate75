@@ -8,8 +8,33 @@ A MicroPython client for the [Pimoroni Interstate 75W (RP2350)](https://shop.pim
 - 🖼️ WebP image decoding via native C module
 - 💡 Automatic brightness control from server
 - 🔄 Continuous frame updates from Tronbyt server
-- ⚡ Optimized for 64x32 HUB75 matrices
+- ⚡ Optimized for 64x32 HUB75 matrices (other sizes supported)
 - 🛠️ Easy configuration
+- 🔧 Two implementation options: Direct WebP or RGB Bridge
+
+## Implementation Options
+
+This repository includes **two approaches** for displaying Tronbyt content:
+
+### 1. Direct WebP Decoding (Recommended for Production)
+
+The main implementation in this README uses a custom C module to decode WebP images directly on the Interstate 75W. This is more efficient but requires building custom firmware.
+
+**Pros:** Efficient, less network traffic, no extra services  
+**Cons:** Requires custom firmware build
+
+### 2. RGB Bridge Service (Quick Start)
+
+An alternative approach using an intermediate service that converts WebP to raw RGB data. The Interstate 75W uses stock MicroPython firmware.
+
+**Pros:** No custom firmware needed, quick setup  
+**Cons:** Extra Docker service, more network traffic
+
+📁 See `rgb-bridge/` directory and `interstate75-client/` for this implementation.
+
+📖 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a detailed comparison.
+
+This README focuses on the **Direct WebP** approach. For the RGB Bridge approach, see [rgb-bridge/README.md](rgb-bridge/README.md).
 
 ## Hardware Requirements
 
