@@ -1,0 +1,43 @@
+# Local configuration
+config_local.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# MicroPython
+*.mpy
+*.uf2
+
+# Build artifacts
+*.o
+*.a
+*.elf
+*.hex
+*.bin
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# libwebp (if cloned locally)
+webpdec/libwebp/
+
+# Logs
+*.log
+
+# Test files
+test_*.py

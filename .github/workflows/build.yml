@@ -1,0 +1,104 @@
+name: Build Firmware
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ created ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install ARM toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-arm-none-eabi cmake
+    
+    - name: Cache MicroPython
+      id: cache-micropython
+      uses: actions/cache@v3
+      with:
+        path: micropython
+        key: ${{ runner.os }}-micropython-${{ hashFiles('**/micropython.mk') }}
+    
+    - name: Clone MicroPython
+      if: steps.cache-micropython.outputs.cache-hit != 'true'
+      run: |
+        git clone https://github.com/micropython/micropython.git
+        cd micropython
+        git submodule update --init
+    
+    - name: Build mpy-cross
+      if: steps.cache-micropython.outputs.cache-hit != 'true'
+      run: |
+        cd micropython/mpy-cross
+        make
+    
+    - name: Copy webpdec module
+      run: |
+        mkdir -p micropython/ports/rp2/modules
+        cp -r webpdec micropython/ports/rp2/modules/
+    
+    - name: Build firmware
+      run: |
+        cd micropython/ports/rp2
+        make BOARD=PIMORONI_INTERSTATE75W USER_C_MODULES=modules/webpdec/micropython.mk
+    
+    - name: Upload firmware artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: firmware
+        path: micropython/ports/rp2/build-PIMORONI_INTERSTATE75W/firmware.uf2
+        retention-days: 30
+    
+    - name: Create release archive
+      if: github.event_name == 'release'
+      run: |
+        mkdir -p release
+        cp micropython/ports/rp2/build-PIMORONI_INTERSTATE75W/firmware.uf2 release/
+        cp main.py config.py README.md LICENSE release/
+        cd release
+        tar -czf ../tronbyt-interstate75-${{ github.ref_name }}.tar.gz *
+    
+    - name: Upload release asset
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./tronbyt-interstate75-${{ github.ref_name }}.tar.gz
+        asset_name: tronbyt-interstate75-${{ github.ref_name }}.tar.gz
+        asset_content_type: application/gzip
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install linting tools
+      run: |
+        pip install ruff
+    
+    - name: Run ruff
+      run: |
+        ruff check main.py config.py examples/*.py
