@@ -1,4 +1,4 @@
-# Configuration for Tronbyt Interstate 75W Client
+# Configuration for Tronbyt RP2350 Client
 # Copy this to config_local.py and customize your settings
 
 # WiFi Configuration
@@ -7,21 +7,19 @@ WIFI_PASSWORD = "YourWiFiPassword"
 
 # Tronbyt Server Configuration
 TRONBYT_SERVER_URL = "http://192.168.1.100:8000"  # Your Tronbyt server address
-DISPLAY_ID = "interstate75-001"  # Unique identifier for this display
+DISPLAY_ID = "rp2350-001"  # Unique identifier for this display
 
 # Display Configuration
+# Common sizes: 64x32, 64x64, 128x32, 128x64
 DISPLAY_WIDTH = 64
 DISPLAY_HEIGHT = 32
 
-# Update interval in seconds (how often to check for new frames)
-UPDATE_INTERVAL = 1.0
+# Update/Retry configuration
+MAX_RETRIES = 3           # Number of fetch retries
+RETRY_DELAY = 2           # Seconds between retries
 
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+# Debug mode (prints extra info on serial console)
+DEBUG = False
 
-# Debug mode (prints extra info)
-DEBUG = True
-
-# Default brightness (0-100) - overridden by server header
+# Default brightness (0-100) - overridden by server header if provided
 DEFAULT_BRIGHTNESS = 50

@@ -1,357 +1,196 @@
-# Tronbyt Interstate 75W Client
+# Tronbyt RP2350 Client
 
-A MicroPython client for the [Pimoroni Interstate 75W (RP2350)](https://shop.pimoroni.com/products/interstate-75-w) that fetches and displays WebP images from a [Tronbyt server](https://github.com/tronbyt/server) on HUB75 LED matrices.
+MicroPython firmware for **RP2350-based boards** that fetches and displays WebP images from a [Tronbyt](https://github.com/tronbyt/server) server on HUB75 LED matrices.
 
 ## Features
 
 - 📡 WiFi connectivity for remote image updates
-- 🖼️ WebP image decoding via native C module
+- 🖼️ Native WebP decoding via C module (`webpdec`)
 - 💡 Automatic brightness control from server
-- 🔄 Continuous frame updates from Tronbyt server
-- ⚡ Optimized for 64x32 HUB75 matrices (other sizes supported)
-- 🛠️ Easy configuration with automatic WiFi provisioning
-- 📱 Built-in captive portal for first-time setup
-- 🔧 Two implementation options: Direct WebP or RGB Bridge
+- 🔄 Continuous frame updates from Tronbyt
+- 🔌 Board-agnostic design (pluggable display drivers)
+- ⚡ Supports 64x32, 64x64, and other HUB75 matrix sizes
+- 📱 Automatic WiFi provisioning with captive portal
 
-## Implementation Options
+## Supported Hardware
 
-This repository includes **two approaches** for displaying Tronbyt content:
+### Primary Target
+- **[Pimoroni Interstate 75W](https://shop.pimoroni.com/products/interstate-75-w)** (RP2350-based HUB75 driver)
 
-### 1. Direct WebP Decoding (Recommended for Production)
-
-The main implementation in this README uses a custom C module to decode WebP images directly on the Interstate 75W. This is more efficient but requires building custom firmware.
-
-**Pros:** Efficient, less network traffic, no extra services  
-**Cons:** Requires custom firmware build
-
-### 2. RGB Bridge Service (Quick Start)
-
-An alternative approach using an intermediate service that converts WebP to raw RGB data. The Interstate 75W uses stock MicroPython firmware.
-
-**Pros:** No custom firmware needed, quick setup  
-**Cons:** Extra Docker service, more network traffic
-
-📁 See `rgb-bridge/` directory and `interstate75-client/` for this implementation.
-
-📖 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a detailed comparison.
-
-This README focuses on the **Direct WebP** approach. For the RGB Bridge approach, see [rgb-bridge/README.md](rgb-bridge/README.md).
+### Other RP2350 Boards
+The firmware is designed to be board-agnostic. To add support for a new board, you need:
+- RP2350 microcontroller
+- WiFi connectivity
+- HUB75 interface (GPIOs + level shifters if needed)
+- Display driver implementation in `main.py`
 
 ## Hardware Requirements
 
-- **Pimoroni Interstate 75W (RP2350)** - HUB75 matrix driver board
-- **64x32 HUB75 LED Matrix** - Any standard HUB75 panel
-- **Power Supply** - 5V power supply capable of powering your matrix
-- **WiFi Network** - For connecting to Tronbyt server
+- **RP2350 board with WiFi** (Interstate 75W recommended)
+- **HUB75 LED Matrix** (64x32 or 64x64)
+- **5V Power Supply** capable of driving your matrix
+- **WiFi Network**
 
 ## Quick Start
 
-### 1. Flash MicroPython Firmware
+### Option 1: Download Pre-built Firmware
 
-Download the latest Interstate 75W MicroPython firmware:
-```bash
-# Get the latest release from Pimoroni
-wget https://github.com/pimoroni/interstate75/releases/latest/download/interstate75w-rp2350-vX.X.X.uf2
-```
+Get the latest firmware from [GitHub Releases](https://github.com/johnfernkas/tronbyt-rp2350/releases):
+- `tronbyt-rp2350-64x32.uf2` - For 64x32 matrices
+- `tronbyt-rp2350-64x64.uf2` - For 64x64 matrices
 
-Flash to your Interstate 75W:
-1. Connect Interstate 75W to your computer via USB-C
-2. Hold **BOOT** button and tap **RST** to enter bootloader mode
-3. Drag and drop the `.uf2` file to the **RP2350** drive
-4. The board will reboot automatically
+Flash to your RP2350 board:
+1. Hold **BOOT** button, plug in USB, release BOOT
+2. Copy the `.uf2` file to the RPI-RP2 drive
+3. Board will reboot with firmware
 
-### 2. Build and Install WebP Decoder Module
-
-The WebP decoder is a C module that needs to be compiled:
+### Option 2: Build from Source
 
 ```bash
-# Clone MicroPython and this repo
+# Clone this repo
+git clone https://github.com/johnfernkas/tronbyt-rp2350.git
+
+# Clone MicroPython and Pimoroni libraries
 git clone https://github.com/micropython/micropython.git
-cd micropython
-git submodule update --init
+git clone https://github.com/pimoroni/interstate75.git
 
-# Copy the webpdec module
-cp -r /path/to/tronbyt-interstate75/webpdec ports/rp2/modules/
-
-# Build MicroPython with the module
-cd ports/rp2
-make BOARD=PIMORONI_INTERSTATE75W USER_C_MODULES=modules/webpdec/micropython.mk
-
-# Flash the resulting .uf2 file
+# Build firmware with webpdec module
+cd micropython/ports/rp2
+make USER_C_MODULES=/path/to/tronbyt-rp2350/webpdec
 ```
-
-**Note:** The current `webpdec.c` includes a placeholder test pattern. For production use, integrate libwebp (see [Building with libwebp](#building-with-libwebp)).
-
-### 3. Configure and Deploy
-
-**Option A: Automatic WiFi Provisioning (Recommended)**
-
-The firmware includes automatic provisioning. On first boot without valid WiFi credentials:
-
-1. The board creates a WiFi access point: `Tronbyt-Setup`
-2. Connect to this AP from your phone/computer (password: `setup1234`)
-3. Open http://192.168.4.1 in your browser
-4. Enter your WiFi credentials and display ID
-5. The device saves settings and reboots automatically
-
-**Option B: Manual Configuration**
-
-1. Copy `config.py` to `config_local.py`:
-```bash
-cp config.py config_local.py
-```
-
-2. Edit `config_local.py` with your settings:
-```python
-WIFI_SSID = "YourWiFiNetwork"
-WIFI_PASSWORD = "YourPassword"
-TRONBYT_SERVER_URL = "http://192.168.1.100:8000"
-DISPLAY_ID = "my-interstate75"
-```
-
-3. Copy files to Interstate 75W:
-```bash
-# Using Thonny, ampy, or mpremote
-mpremote cp config_local.py :config_local.py
-mpremote cp main.py :main.py
-mpremote cp provisioning.py :provisioning.py
-```
-
-4. Reboot the board - it will automatically run `main.py`
-
-## WiFi Provisioning
-
-The firmware supports automatic WiFi provisioning via a captive portal, making it easy to configure new devices without editing files.
-
-### How It Works
-
-1. **First Boot Detection**: On startup, the firmware checks for `config_local.py`
-2. **Invalid Config**: If WiFi credentials are missing or contain placeholder values, provisioning mode activates
-3. **AP Mode**: The device creates `Tronbyt-Setup` WiFi network
-4. **Web Server**: A built-in HTTP server serves the configuration page at `http://192.168.4.1`
-5. **Auto-Save**: Settings are saved to `config_local.py` and the device reboots
-
-### Provisioning Page Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| WiFi Network Name | Yes | Your 2.4GHz WiFi SSID |
-| WiFi Password | No | WiFi password (leave empty for open networks) |
-| Display ID | Yes | Unique identifier for this display (e.g., `living-room`) |
-| Server URL | No | Tronbyt server address (defaults to auto-discovery) |
-
-### Re-Provisioning
-
-To reconfigure an existing device:
-
-1. Delete `config_local.py` from the device:
-   ```bash
-   mpremote rm :config_local.py
-   ```
-
-2. Reboot - the device will enter provisioning mode again
-
-Or manually edit `config_local.py` via USB.
 
 ## Configuration
 
-All configuration is in `config.py` (or `config_local.py`):
+### Option 1: Automatic WiFi Provisioning (Recommended)
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `WIFI_SSID` | WiFi network name | `"YourWiFiSSID"` |
-| `WIFI_PASSWORD` | WiFi password | `"YourWiFiPassword"` |
-| `TRONBYT_SERVER_URL` | Tronbyt server URL | `"http://192.168.1.100:8000"` |
-| `DISPLAY_ID` | Unique display identifier | `"interstate75-001"` |
-| `DISPLAY_WIDTH` | Matrix width in pixels | `64` |
-| `DISPLAY_HEIGHT` | Matrix height in pixels | `32` |
-| `UPDATE_INTERVAL` | Frame update interval (seconds) | `1.0` |
-| `MAX_RETRIES` | Max consecutive errors before showing error | `3` |
-| `DEFAULT_BRIGHTNESS` | Default brightness (0-100) | `50` |
-| `DEBUG` | Enable debug output | `True` |
+On first boot (or when no valid WiFi config exists), the device automatically enters provisioning mode:
 
-## Tronbyt Server Setup
+1. Creates WiFi AP: `Tronbyt-Setup` (password: `setup1234`)
+2. Connect your phone/computer to this AP
+3. Open http://192.168.4.1 in your browser
+4. Enter WiFi credentials and display settings
+5. Device saves config and reboots automatically
 
-This client connects to a Tronbyt server. Set up your server first:
+### Option 2: Manual Configuration
 
-1. **Install Tronbyt Server** (see [tronbyt/server](https://github.com/tronbyt/server)):
-   ```bash
-   docker compose up -d
-   ```
+Copy `config.py` to `config_local.py` and edit:
 
-2. **Add your display** via the web UI at `http://localhost:8000`
+```python
+# WiFi Configuration
+WIFI_SSID = "YourWiFiSSID"
+WIFI_PASSWORD = "YourWiFiPassword"
 
-3. **Configure apps** using the Pixlet interface
+# Tronbyt Server Configuration
+TRONBYT_SERVER_URL = "http://192.168.1.100:8000"
+DISPLAY_ID = "rp2350-001"
 
-4. The client will automatically fetch frames from:
-   ```
-   GET /frame?display={DISPLAY_ID}
-   ```
+# Display Configuration
+DISPLAY_WIDTH = 64
+DISPLAY_HEIGHT = 32
 
-Server response headers:
-- `X-Brightness` or `Tronbyt-Brightness`: Brightness value (0-100)
-
-## Building with libwebp
-
-For production use with real WebP decoding:
-
-### Option 1: Minimal libwebp Integration
-
-1. Download libwebp:
-```bash
-cd webpdec/
-git clone https://chromium.googlesource.com/webm/libwebp
+# Debug mode
+DEBUG = False
 ```
 
-2. Update `webpdec/micropython.mk` to include libwebp sources (see comments in file)
-
-3. Replace `webpdec.c` with `webpdec_full.c`:
-```bash
-mv webpdec.c webpdec_placeholder.c
-mv webpdec_full.c webpdec.c
-```
-
-4. Rebuild MicroPython firmware with the updated module
-
-### Option 2: Pre-built Module (.mpy)
-
-If you have a working `.mpy` compiled module, you can deploy it directly:
+Upload to your board using [Thonny](https://thonny.org/) or `mpremote`:
 
 ```bash
-mpremote cp webpdec.mpy :webpdec.mpy
+mpremote cp config_local.py :
+mpremote cp provisioning.py :  # Required for provisioning mode
+mpremote reset
 ```
+
+### Re-Provisioning
+
+To reconfigure WiFi on an existing device:
+
+```bash
+mpremote rm :config_local.py
+mpremote reset
+```
+
+The device will enter provisioning mode on next boot.
 
 ## Architecture
 
 ```
-┌─────────────────────┐
-│  Interstate 75W     │
-│  (RP2350)           │
-│                     │
-│  ┌──────────────┐   │      ┌──────────────┐
-│  │  main.py     │◄──┼──────┤ Tronbyt      │
-│  │              │   │ WiFi │ Server       │
-│  │  - WiFi      │   │      │              │
-│  │  - HTTP      │   │      │ - Apps       │
-│  │  - Display   │   │      │ - Rendering  │
-│  └──────┬───────┘   │      └──────────────┘
-│         │           │
-│         ▼           │
-│  ┌──────────────┐   │
-│  │  webpdec.so  │   │
-│  │  (C module)  │   │
-│  │              │   │
-│  │  - libwebp   │   │
-│  │  - RGB565    │   │
-│  └──────┬───────┘   │
-│         │           │
-│         ▼           │
-│  ┌──────────────┐   │
-│  │  HUB75       │   │      ┌──────────────┐
-│  │  Driver      │───┼──────►  64x32 LED   │
-│  └──────────────┘   │      │  Matrix      │
-└─────────────────────┘      └──────────────┘
+┌─────────────────┐
+│ Tronbyt Server  │  Renders Pixlet apps to WebP
+└────────┬────────┘
+         │ HTTP GET /next
+         ▼
+┌─────────────────┐
+│  RP2350 Board   │  MicroPython + webpdec module
+│  - WiFi         │  Decodes WebP to RGB565
+│  - webpdec      │  Displays on HUB75 matrix
+│  - HUB75 driver │
+└────────┬────────┘
+         │ HUB75 protocol
+         ▼
+┌─────────────────┐
+│  LED Matrix     │  64x32 or 64x64 RGB panel
+└─────────────────┘
 ```
 
-## Memory Considerations
+## Board Abstraction
 
-The RP2350 has **520KB of SRAM**. For a 64x32 display:
+The firmware uses a board abstraction layer in `main.py`. Currently supports:
 
-- **Frame buffer (RGB565)**: 64 × 32 × 2 = 4,096 bytes
-- **WebP decode buffer**: ~10-20KB (depends on image)
-- **HTTP buffer**: ~4KB
-- **MicroPython runtime**: ~200KB
-
-Total usage is well within limits for this display size.
-
-## Troubleshooting
-
-### WiFi won't connect
-- Check SSID and password in `config_local.py`
-- Ensure your network is 2.4GHz (Interstate 75W doesn't support 5GHz)
-- Check signal strength
-
-### Display shows "Error"
-- Check Tronbyt server is running and accessible
-- Verify `TRONBYT_SERVER_URL` is correct
-- Check `DISPLAY_ID` matches a display in your Tronbyt server
-- Enable `DEBUG = True` and check serial output
-
-### No image or blank display
-- Verify WebP decoder module is installed (`import webpdec` in REPL)
-- Check HUB75 matrix is properly connected
-- Verify power supply is adequate for your matrix
-- Try adjusting brightness
-
-### "webpdec module not found"
-- The C module wasn't compiled into the firmware
-- See [Build and Install WebP Decoder Module](#2-build-and-install-webp-decoder-module)
-
-### Memory errors
-- Reduce `UPDATE_INTERVAL` to allow more GC time
-- Use smaller images from Tronbyt server
-- Disable debug mode (`DEBUG = False`)
-
-## Development
-
-### Project Structure
-```
-tronbyt-interstate75/
-├── main.py                 # Main firmware logic
-├── config.py               # Configuration template
-├── config_local.py         # Your local config (gitignored)
-├── provisioning.py         # WiFi captive portal provisioning
-├── webpdec/                # WebP decoder C module
-│   ├── webpdec.c           # Placeholder implementation
-│   ├── webpdec_full.c      # Full libwebp implementation
-│   └── micropython.mk      # MicroPython build config
-├── docs/                   # Additional documentation
-├── examples/               # Example code
-├── LICENSE                 # MIT License
-└── README.md               # This file
+### Interstate 75 (Pimoroni)
+```python
+from interstate75 import Interstate75
+BOARD_TYPE = "interstate75"
 ```
 
-### Running Tests
+### Adding New Board Support
 
-```bash
-# Test on device via REPL
-mpremote repl
+To add a new board, modify the `_init_display()` method in `main.py`:
 
->>> import main
->>> client = main.TronbytClient()
->>> client.connect_wifi()
->>> client.run()
+```python
+def _init_display(self):
+    if BOARD_TYPE == "your_board":
+        # Initialize your display driver
+        self.display = YourDriver()
+        self._display_type = "your_board"
 ```
 
-### Contributing
+And implement `_display_rgb565()` for your hardware.
 
-Contributions are welcome! Please:
+## webpdec Module
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test on real hardware
-5. Submit a pull request
+The `webpdec` module is a MicroPython native module in C that decodes WebP to RGB565.
 
-## Related Projects
+**API:**
+```python
+import webpdec
 
-- [Tronbyt Server](https://github.com/tronbyt/server) - Local Tidbyt-compatible server
-- [Pimoroni Interstate 75](https://github.com/pimoroni/interstate75) - Official Interstate 75 MicroPython
-- [libwebp](https://github.com/webmproject/libwebp) - WebP image library
+# Decode WebP to RGB565 format
+rgb565_data = webpdec.decode(webp_bytes, width, height)
+# Returns: bytearray (width * height * 2 bytes)
+```
+
+See `webpdec/webpdec.c` for the implementation.
+
+## CI/CD
+
+GitHub Actions automatically builds firmware on every push:
+- Builds for 64x32 and 64x64 display sizes
+- Creates release artifacts
+- Publishes to GitHub Releases on tagged versions
+
+## Tronbyt Server Setup
+
+You'll need a Tronbyt server running. See [github.com/tronbyt/server](https://github.com/tronbyt/server) for setup.
+
+## Files
+
+- `main.py` - Main firmware with board abstraction
+- `config.py` - Configuration template
+- `provisioning.py` - WiFi captive portal for automatic setup
+- `webpdec/` - C WebP decoder module
+  - `webpdec.c` - Module implementation
+  - `micropython.mk` - Build integration
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/johnfernkas/tronbyt-interstate75/issues)
-- **Tronbyt Discussions**: [Tronbyt Server Discussions](https://github.com/tronbyt/server/discussions)
-- **Pimoroni Forums**: [Pimoroni Forum](https://forums.pimoroni.com/)
-
-## Acknowledgments
-
-- [Pimoroni](https://pimoroni.com) for the excellent Interstate 75W hardware
-- [Tronbyt](https://github.com/tronbyt) team for the local Tidbyt server
-- [MicroPython](https://micropython.org) community
-- [WebM Project](https://www.webmproject.org/) for libwebp
+MIT License - See [LICENSE](LICENSE)

@@ -1,0 +1,142 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: tronbyt-rp2350
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential git
+      
+      - name: Checkout MicroPython
+        uses: actions/checkout@v4
+        with:
+          repository: micropython/micropython
+          ref: master
+          path: micropython
+          submodules: recursive
+      
+      - name: Checkout Pimoroni Pico Libraries
+        uses: actions/checkout@v4
+        with:
+          repository: pimoroni/pimoroni-pico
+          path: pimoroni-pico
+      
+      - name: Build mpy-cross
+        run: |
+          cd micropython/mpy-cross
+          make
+      
+      - name: Prepare build environment
+        run: |
+          cd micropython/ports/rp2
+          make submodules
+      
+      - name: Build firmware for 64x32 display
+        run: |
+          cd micropython/ports/rp2
+          make BOARD=PIMORONI_INTERSTATE75_2350 \
+               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.mk \
+               FROZEN_MANIFEST=$GITHUB_WORKSPACE/pimoroni-pico/micropython/modules_py/interstate75.cmake
+          cd build-PIMORONI_INTERSTATE75_2350
+          mv firmware.uf2 tronbyt-rp2350-64x32.uf2
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+      
+      - name: Clean build directory
+        run: |
+          cd micropython/ports/rp2
+          make BOARD=PIMORONI_INTERSTATE75_2350 clean
+      
+      - name: Build firmware for 64x64 display
+        run: |
+          cd micropython/ports/rp2
+          make BOARD=PIMORONI_INTERSTATE75_2350 \
+               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.mk \
+               FROZEN_MANIFEST=$GITHUB_WORKSPACE/pimoroni-pico/micropython/modules_py/interstate75.cmake
+          cd build-PIMORONI_INTERSTATE75_2350
+          mv firmware.uf2 tronbyt-rp2350-64x64.uf2
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+      
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## Tronbyt RP2350 Firmware
+          
+          ### 🎯 Pre-built MicroPython firmware with WebP decoding support
+          
+          This release includes firmware binaries for the Pimoroni Interstate 75W (RP2350) with the custom `webpdec` module built-in.
+          
+          ### 📦 Downloads
+          
+          - **tronbyt-rp2350-64x32.uf2** - For 64x32 HUB75 matrices
+          - **tronbyt-rp2350-64x64.uf2** - For 64x64 HUB75 matrices
+          
+          ### 📋 Installation
+          
+          1. Hold the **BOOT** button on your Interstate 75W
+          2. Connect USB cable (while holding BOOT)
+          3. Release BOOT - device appears as USB drive
+          4. Copy the appropriate `.uf2` file to the drive
+          5. Device will reboot automatically with new firmware
+          
+          ### 🔧 Configuration
+          
+          After flashing firmware:
+          
+          1. Download `config.py` from this repository
+          2. Rename to `config_local.py`
+          3. Edit WiFi credentials and Tronbyt server URL
+          4. Upload `config_local.py` and `main.py` using Thonny or mpremote
+          
+          ### ✨ What's Included
+          
+          - MicroPython for RP2350
+          - Custom `webpdec` C module for WebP decoding
+          - Pimoroni Interstate 75 libraries
+          
+          ### 🐛 Issues?
+          
+          Report bugs or issues at: https://github.com/johnfernkas/tronbyt-rp2350/issues
+          EOF
+          echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            micropython/ports/rp2/build-PIMORONI_INTERSTATE75_2350/tronbyt-rp2350-64x32.uf2
+            micropython/ports/rp2/build-PIMORONI_INTERSTATE75_2350/tronbyt-rp2350-64x64.uf2
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Release summary
+        run: |
+          echo "🎉 Release created successfully!"
+          echo "📦 Firmware files uploaded:"
+          ls -lh micropython/ports/rp2/build-PIMORONI_INTERSTATE75_2350/*.uf2

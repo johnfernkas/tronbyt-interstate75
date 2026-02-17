@@ -11,7 +11,7 @@
 // For production, you'd use libwebp, but we'll create a simple wrapper here
 
 // Function prototypes
-STATIC mp_obj_t webpdec_decode(mp_obj_t data_obj, mp_obj_t width_obj, mp_obj_t height_obj);
+static mp_obj_t webpdec_decode(mp_obj_t data_obj, mp_obj_t width_obj, mp_obj_t height_obj);
 
 /*
  * Decode WebP image to RGB565
@@ -24,7 +24,7 @@ STATIC mp_obj_t webpdec_decode(mp_obj_t data_obj, mp_obj_t width_obj, mp_obj_t h
  * Returns:
  *   bytearray - RGB565 pixel data (width * height * 2 bytes)
  */
-STATIC mp_obj_t webpdec_decode(mp_obj_t data_obj, mp_obj_t width_obj, mp_obj_t height_obj) {
+static mp_obj_t webpdec_decode(mp_obj_t data_obj, mp_obj_t width_obj, mp_obj_t height_obj) {
     // Get WebP data
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(data_obj, &bufinfo, MP_BUFFER_READ);
@@ -104,14 +104,14 @@ STATIC mp_obj_t webpdec_decode(mp_obj_t data_obj, mp_obj_t width_obj, mp_obj_t h
     
     return result;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_3(webpdec_decode_obj, webpdec_decode);
+static MP_DEFINE_CONST_FUN_OBJ_3(webpdec_decode_obj, webpdec_decode);
 
 // Module globals table
-STATIC const mp_rom_map_elem_t webpdec_module_globals_table[] = {
+static const mp_rom_map_elem_t webpdec_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_webpdec) },
     { MP_ROM_QSTR(MP_QSTR_decode), MP_ROM_PTR(&webpdec_decode_obj) },
 };
-STATIC MP_DEFINE_CONST_DICT(webpdec_module_globals, webpdec_module_globals_table);
+static MP_DEFINE_CONST_DICT(webpdec_module_globals, webpdec_module_globals_table);
 
 // Module definition
 const mp_obj_module_t webpdec_module = {

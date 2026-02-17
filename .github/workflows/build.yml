@@ -1,104 +1,135 @@
-name: Build Firmware
+name: Build MicroPython Firmware
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
-  release:
-    types: [ created ]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    
+    strategy:
+      matrix:
+        include:
+          - board: "i75w_rp2350"
+            display_size: "64x32"
+          - board: "i75w_rp2350"
+            display_size: "64x64"
+    
+    env:
+      MICROPYTHON_VERSION: "master"
+      PIMORONI_PICO_VERSION: "feature/picovector2-and-layers"
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential git ccache python3-pip
+          pip3 install littlefs-python
       
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install ARM toolchain
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-arm-none-eabi cmake
-    
-    - name: Cache MicroPython
-      id: cache-micropython
-      uses: actions/cache@v3
-      with:
-        path: micropython
-        key: ${{ runner.os }}-micropython-${{ hashFiles('**/micropython.mk') }}
-    
-    - name: Clone MicroPython
-      if: steps.cache-micropython.outputs.cache-hit != 'true'
-      run: |
-        git clone https://github.com/micropython/micropython.git
-        cd micropython
-        git submodule update --init
-    
-    - name: Build mpy-cross
-      if: steps.cache-micropython.outputs.cache-hit != 'true'
-      run: |
-        cd micropython/mpy-cross
-        make
-    
-    - name: Copy webpdec module
-      run: |
-        mkdir -p micropython/ports/rp2/modules
-        cp -r webpdec micropython/ports/rp2/modules/
-    
-    - name: Build firmware
-      run: |
-        cd micropython/ports/rp2
-        make BOARD=PIMORONI_INTERSTATE75W USER_C_MODULES=modules/webpdec/micropython.mk
-    
-    - name: Upload firmware artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: firmware
-        path: micropython/ports/rp2/build-PIMORONI_INTERSTATE75W/firmware.uf2
-        retention-days: 30
-    
-    - name: Create release archive
-      if: github.event_name == 'release'
-      run: |
-        mkdir -p release
-        cp micropython/ports/rp2/build-PIMORONI_INTERSTATE75W/firmware.uf2 release/
-        cp main.py config.py provisioning.py README.md LICENSE release/
-        cd release
-        tar -czf ../tronbyt-interstate75-${{ github.ref_name }}.tar.gz *
-    
-    - name: Upload release asset
-      if: github.event_name == 'release'
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./tronbyt-interstate75-${{ github.ref_name }}.tar.gz
-        asset_name: tronbyt-interstate75-${{ github.ref_name }}.tar.gz
-        asset_content_type: application/gzip
-
-  lint:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Install Arm GNU Toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '14.2.Rel1'
       
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install linting tools
-      run: |
-        pip install ruff
-    
-    - name: Run ruff
-      run: |
-        ruff check main.py config.py provisioning.py examples/*.py
+      - name: Checkout Tronbyt RP2350
+        uses: actions/checkout@v4
+        with:
+          path: tronbyt-rp2350
+      
+      - name: Checkout MicroPython
+        uses: actions/checkout@v4
+        with:
+          repository: micropython/micropython
+          ref: ${{ env.MICROPYTHON_VERSION }}
+          path: micropython
+          submodules: recursive
+      
+      - name: Checkout Pimoroni Pico Libraries
+        uses: actions/checkout@v4
+        with:
+          repository: pimoroni/pimoroni-pico
+          ref: ${{ env.PIMORONI_PICO_VERSION }}
+          path: pimoroni-pico
+          submodules: true
+      
+      - name: Checkout Pimoroni Interstate75
+        uses: actions/checkout@v4
+        with:
+          repository: pimoroni/interstate75
+          path: interstate75
+          submodules: true
+      
+      - name: Build mpy-cross
+        run: |
+          cd micropython/mpy-cross
+          make -j$(nproc)
+      
+      - name: Create webpdec usermod.cmake
+        run: |
+          # Create usermod.cmake for webpdec
+          cat > $GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/usermod.cmake << 'EOF'
+          add_library(usermod_webpdec INTERFACE)
+          
+          target_sources(usermod_webpdec INTERFACE
+              ${CMAKE_CURRENT_LIST_DIR}/webpdec.c
+          )
+          
+          target_include_directories(usermod_webpdec INTERFACE
+              ${CMAKE_CURRENT_LIST_DIR}
+          )
+          
+          target_link_libraries(usermod INTERFACE usermod_webpdec)
+          EOF
+      
+      - name: Configure build
+        run: |
+          BOARD=${{ matrix.board }}
+          BOARD_DIR=$GITHUB_WORKSPACE/interstate75/boards/$BOARD
+          BUILD_DIR=$GITHUB_WORKSPACE/build-$BOARD
+          
+          echo "Building for board: $BOARD"
+          echo "Board directory: $BOARD_DIR"
+          
+          # Create build directory
+          mkdir -p $BUILD_DIR
+          
+          # Configure with cmake - combining Interstate75 modules with webpdec
+          cmake -S $GITHUB_WORKSPACE/micropython/ports/rp2 -B $BUILD_DIR \
+            -DPICOTOOL_FORCE_FETCH_FROM_GIT=1 \
+            -DPICO_BUILD_DOCS=0 \
+            -DPICO_NO_COPRO_DIS=1 \
+            -DPIMORONI_PICO_PATH=$GITHUB_WORKSPACE/pimoroni-pico \
+            -DUSER_C_MODULES="$GITHUB_WORKSPACE/interstate75/boards/usermod-common.cmake;$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/usermod.cmake" \
+            -DMICROPY_BOARD_DIR=$BOARD_DIR \
+            -DMICROPY_BOARD=$BOARD \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      
+      - name: Build firmware
+        run: |
+          BOARD=${{ matrix.board }}
+          BUILD_DIR=$GITHUB_WORKSPACE/build-$BOARD
+          
+          # Build
+          cmake --build $BUILD_DIR -j$(nproc)
+          
+          # Rename output
+          cp $BUILD_DIR/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-${{ matrix.display_size }}.uf2
+      
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tronbyt-rp2350-${{ matrix.display_size }}
+          path: tronbyt-rp2350-${{ matrix.display_size }}.uf2
+          retention-days: 30
+      
+      - name: Display build info
+        run: |
+          echo "✅ Build completed successfully!"
+          echo "Board: ${{ matrix.board }}"
+          echo "Display: ${{ matrix.display_size }}"
+          ls -lh *.uf2
