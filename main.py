@@ -9,8 +9,39 @@ import urequests as requests
 from interstate75 import Interstate75, DISPLAY_INTERSTATE75_64X32
 from picographics import PicoGraphics, DISPLAY_INTERSTATE75_64X32 as DISPLAY_MODE
 import gc
+import sys
 
-# Try to import local config, fall back to default
+# Check if we need provisioning before importing config
+# This must be done early before other imports that might depend on config
+_needs_provisioning = False
+try:
+    import config_local
+    # Config exists, check if it has placeholder values
+    if (not hasattr(config_local, 'WIFI_SSID') or 
+        not config_local.WIFI_SSID or 
+        config_local.WIFI_SSID == "YourWiFiSSID"):
+        _needs_provisioning = True
+except ImportError:
+    _needs_provisioning = True
+
+# If provisioning needed, start provisioning server
+if _needs_provisioning:
+    print("=" * 50)
+    print("TRONBYT PROVISIONING MODE")
+    print("=" * 50)
+    print("No valid configuration found.")
+    print("Starting provisioning access point...")
+    try:
+        import provisioning
+        provisioning.start_provisioning()
+    except Exception as e:
+        print(f"Provisioning failed: {e}")
+        sys.print_exception(e)
+        # Fall through to allow manual config editing via USB
+    # If provisioning exits without reboot, continue to normal mode
+    # to allow fallback behavior
+
+# Import configuration (local config overrides defaults)
 try:
     from config_local import *
 except ImportError:

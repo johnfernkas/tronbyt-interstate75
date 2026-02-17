@@ -68,7 +68,7 @@ jobs:
       run: |
         mkdir -p release
         cp micropython/ports/rp2/build-PIMORONI_INTERSTATE75W/firmware.uf2 release/
-        cp main.py config.py README.md LICENSE release/
+        cp main.py config.py provisioning.py README.md LICENSE release/
         cd release
         tar -czf ../tronbyt-interstate75-${{ github.ref_name }}.tar.gz *
     
@@ -101,4 +101,4 @@ jobs:
     
     - name: Run ruff
       run: |
-        ruff check main.py config.py examples/*.py
+        ruff check main.py config.py provisioning.py examples/*.py

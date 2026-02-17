@@ -9,7 +9,8 @@ A MicroPython client for the [Pimoroni Interstate 75W (RP2350)](https://shop.pim
 - 💡 Automatic brightness control from server
 - 🔄 Continuous frame updates from Tronbyt server
 - ⚡ Optimized for 64x32 HUB75 matrices (other sizes supported)
-- 🛠️ Easy configuration
+- 🛠️ Easy configuration with automatic WiFi provisioning
+- 📱 Built-in captive portal for first-time setup
 - 🔧 Two implementation options: Direct WebP or RGB Bridge
 
 ## Implementation Options
@@ -83,6 +84,18 @@ make BOARD=PIMORONI_INTERSTATE75W USER_C_MODULES=modules/webpdec/micropython.mk
 
 ### 3. Configure and Deploy
 
+**Option A: Automatic WiFi Provisioning (Recommended)**
+
+The firmware includes automatic provisioning. On first boot without valid WiFi credentials:
+
+1. The board creates a WiFi access point: `Tronbyt-Setup`
+2. Connect to this AP from your phone/computer (password: `setup1234`)
+3. Open http://192.168.4.1 in your browser
+4. Enter your WiFi credentials and display ID
+5. The device saves settings and reboots automatically
+
+**Option B: Manual Configuration**
+
 1. Copy `config.py` to `config_local.py`:
 ```bash
 cp config.py config_local.py
@@ -101,9 +114,44 @@ DISPLAY_ID = "my-interstate75"
 # Using Thonny, ampy, or mpremote
 mpremote cp config_local.py :config_local.py
 mpremote cp main.py :main.py
+mpremote cp provisioning.py :provisioning.py
 ```
 
 4. Reboot the board - it will automatically run `main.py`
+
+## WiFi Provisioning
+
+The firmware supports automatic WiFi provisioning via a captive portal, making it easy to configure new devices without editing files.
+
+### How It Works
+
+1. **First Boot Detection**: On startup, the firmware checks for `config_local.py`
+2. **Invalid Config**: If WiFi credentials are missing or contain placeholder values, provisioning mode activates
+3. **AP Mode**: The device creates `Tronbyt-Setup` WiFi network
+4. **Web Server**: A built-in HTTP server serves the configuration page at `http://192.168.4.1`
+5. **Auto-Save**: Settings are saved to `config_local.py` and the device reboots
+
+### Provisioning Page Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| WiFi Network Name | Yes | Your 2.4GHz WiFi SSID |
+| WiFi Password | No | WiFi password (leave empty for open networks) |
+| Display ID | Yes | Unique identifier for this display (e.g., `living-room`) |
+| Server URL | No | Tronbyt server address (defaults to auto-discovery) |
+
+### Re-Provisioning
+
+To reconfigure an existing device:
+
+1. Delete `config_local.py` from the device:
+   ```bash
+   mpremote rm :config_local.py
+   ```
+
+2. Reboot - the device will enter provisioning mode again
+
+Or manually edit `config_local.py` via USB.
 
 ## Configuration
 
@@ -252,6 +300,7 @@ tronbyt-interstate75/
 ├── main.py                 # Main firmware logic
 ├── config.py               # Configuration template
 ├── config_local.py         # Your local config (gitignored)
+├── provisioning.py         # WiFi captive portal provisioning
 ├── webpdec/                # WebP decoder C module
 │   ├── webpdec.c           # Placeholder implementation
 │   ├── webpdec_full.c      # Full libwebp implementation
