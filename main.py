@@ -377,14 +377,14 @@ class TronbytClient:
                 print("[FETCH] Could not parse status code")
                 return None, 15, None
             
+            # Parse headers for all responses
+            headers = {}
+            for line in header_lines[1:]:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    headers[key.strip().lower()] = value.strip()
+            
             if status_code == 200:
-                # Parse headers
-                headers = {}
-                for line in header_lines[1:]:
-                    if ':' in line:
-                        key, value = line.split(':', 1)
-                        headers[key.strip().lower()] = value.strip()
-                
                 dwell_secs = int(headers.get('tronbyt-dwell-secs', '15'))
                 brightness = int(headers.get('tronbyt-brightness', '-1'))
                 
@@ -395,6 +395,18 @@ class TronbytClient:
                     print(f"[FETCH] Got frame: {len(body)} bytes, dwell={dwell_secs}s")
                 
                 return body, dwell_secs, headers.get('content-type', '')
+                
+            elif status_code in (301, 302, 303, 307, 308):
+                # Handle redirect
+                location = headers.get('location', '')
+                if location:
+                    if DEBUG:
+                        print(f"[FETCH] Redirect ({status_code}) to: {location}")
+                    # Follow redirect
+                    return self._fetch_with_redirect(location)
+                else:
+                    print(f"[FETCH] Redirect ({status_code}) but no Location header")
+                    return None, 15, None
                 
             elif status_code == 401:
                 print(f"[FETCH] Error: Authentication failed (401)")
@@ -412,6 +424,121 @@ class TronbytClient:
             sys.print_exception(e)
             return self._fetch_frame_alternate()
     
+    def _fetch_with_redirect(self, location, max_redirects=3):
+        """Follow a redirect to fetch the frame."""
+        import socket
+        
+        if max_redirects <= 0:
+            print("[FETCH] Too many redirects")
+            return None, 15, None
+        
+        # Parse the location URL
+        if location.startswith('http://'):
+            location = location[7:]
+        elif location.startswith('https://'):
+            print("[FETCH] HTTPS not supported, skipping")
+            return None, 15, None
+        
+        # Split path from host
+        if '/' in location:
+            host_port, path = location.split('/', 1)
+            path = '/' + path
+        else:
+            host_port = location
+            path = '/'
+        
+        # Parse host and port
+        if ':' in host_port:
+            host, port = host_port.split(':')
+            port = int(port)
+        else:
+            host = host_port
+            port = 80
+        
+        if DEBUG:
+            print(f"[FETCH] Redirect to: {host}:{port}{path}")
+        
+        try:
+            addr = socket.getaddrinfo(host, port)[0][-1]
+            s = socket.socket()
+            s.settimeout(10)
+            s.connect(addr)
+            
+            request_lines = [
+                f"GET {path} HTTP/1.1",
+                f"Host: {host}:{port}",
+                "Connection: close",
+            ]
+            
+            if self.api_key:
+                request_lines.append(f"Authorization: {self.api_key}")
+            
+            request_lines.append("")
+            request = "\r\n".join(request_lines) + "\r\n"
+            
+            s.send(request.encode())
+            
+            response = b""
+            while True:
+                try:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+                except:
+                    break
+            
+            s.close()
+            
+            header_end = response.find(b"\r\n\r\n")
+            if header_end == -1:
+                return None, 15, None
+            
+            headers_bytes = response[:header_end]
+            body = response[header_end + 4:]
+            
+            header_lines = headers_bytes.decode('utf-8', 'ignore').split("\r\n")
+            status_line = header_lines[0]
+            parts = status_line.split()
+            
+            if len(parts) < 2:
+                return None, 15, None
+            
+            try:
+                status_code = int(parts[1])
+            except:
+                return None, 15, None
+            
+            # Parse headers
+            headers = {}
+            for line in header_lines[1:]:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    headers[key.strip().lower()] = value.strip()
+            
+            if status_code == 200:
+                dwell_secs = int(headers.get('tronbyt-dwell-secs', '15'))
+                brightness = int(headers.get('tronbyt-brightness', '-1'))
+                
+                if brightness >= 0:
+                    self.set_brightness(brightness)
+                
+                if DEBUG:
+                    print(f"[FETCH] Got frame after redirect: {len(body)} bytes")
+                
+                return body, dwell_secs, headers.get('content-type', '')
+            elif status_code in (301, 302, 303, 307, 308):
+                # Follow another redirect
+                new_location = headers.get('location', '')
+                if new_location and max_redirects > 1:
+                    return self._fetch_with_redirect(new_location, max_redirects - 1)
+            
+            return None, 15, None
+            
+        except Exception as e:
+            print(f"[FETCH] Redirect fetch error: {e}")
+            return None, 15, None
+
     def _fetch_frame_alternate(self):
         """Try alternate API endpoint formats using raw sockets."""
         import socket
