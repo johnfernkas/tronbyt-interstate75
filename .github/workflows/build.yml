@@ -85,6 +85,46 @@ jobs:
           target_link_libraries(usermod INTERFACE usermod_webpdec)
           EOF
       
+      - name: Prepare Python modules for freezing
+        run: |
+          # Create modules directory structure for freezing
+          MODULES_DIR=$GITHUB_WORKSPACE/tronbyt-rp2350/modules
+          mkdir -p $MODULES_DIR
+          
+          # Copy Python files to modules directory
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/config.py $MODULES_DIR/
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/provisioning.py $MODULES_DIR/
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/main.py $MODULES_DIR/
+          
+          # Create boot.py that runs our main module
+          cat > $MODULES_DIR/boot.py << 'EOF'
+          # Tronbyt RP2350 Boot Script
+          # This runs automatically on startup and launches the main application
+          
+          try:
+              import main
+          except Exception as e:
+              import sys
+              print("Error starting Tronbyt:", e)
+              sys.print_exception(e)
+          EOF
+          
+          # Create a frozen manifest that includes our modules
+          # Use the directory path for the modules
+          cat > $GITHUB_WORKSPACE/tronbyt-rp2350/manifest.py << EOF
+          # Include the default manifest
+          include("$(PORT_DIR)/boards/manifest.py")
+          
+          # Freeze our application modules from the modules directory
+          module("$MODULES_DIR/boot.py")
+          module("$MODULES_DIR/config.py")
+          module("$MODULES_DIR/provisioning.py")
+          module("$MODULES_DIR/main.py")
+          EOF
+          
+          echo "✅ Python modules prepared for freezing"
+          ls -la $MODULES_DIR/
+      
       - name: Configure build
         run: |
           BOARD=${{ matrix.board }}
@@ -107,7 +147,9 @@ jobs:
             -DMICROPY_BOARD_DIR=$BOARD_DIR \
             -DMICROPY_BOARD=$BOARD \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DFROZEN_MANIFEST=$GITHUB_WORKSPACE/tronbyt-rp2350/manifest.py \
+            -DMICROPY_FROZEN_MANIFEST=$GITHUB_WORKSPACE/tronbyt-rp2350/manifest.py
       
       - name: Build firmware
         run: |
