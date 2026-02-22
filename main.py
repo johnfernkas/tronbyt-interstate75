@@ -291,18 +291,17 @@ class TronbytClient:
         """Fetch a frame from the Tronbyt server."""
         import urequests as requests
         
-        # Build URL with device ID - Tronbyt API format
-        # Try common patterns: /devices/{id}/next or /api/v1/devices/{id}/next
-        url = f"{self.server_url}/devices/{self.display_id}/next"
+        # Try the /next endpoint first (for scheduled frames)
+        url = f"{self.server_url}/v0/devices/{self.display_id}/next"
         
-        # Prepare headers with API key if available
+        # Prepare headers with API key - Tronbyt uses raw key, not Bearer format
         headers = {}
         if self.api_key:
-            headers['Authorization'] = f'Bearer {self.api_key}'
+            headers['Authorization'] = self.api_key
         
         if DEBUG:
             print(f"[FETCH] Fetching frame from: {url}")
-            print(f"[FETCH] Headers: {headers if self.api_key else 'No API key'}")
+            print(f"[FETCH] API Key present: {'Yes' if self.api_key else 'No'}")
         
         try:
             response = requests.get(url, headers=headers, timeout=10)
@@ -326,9 +325,8 @@ class TronbytClient:
                 print(f"[FETCH] Check your DEVICE_API_KEY in config")
                 return None, 15, None
             elif response.status_code == 404:
-                print(f"[FETCH] Error: Device not found (404)")
-                print(f"[FETCH] Check DISPLAY_ID matches registered device")
-                # Try alternate URL format
+                print(f"[FETCH] Error: Endpoint not found (404)")
+                print(f"[FETCH] Trying alternate endpoints...")
                 return self._fetch_frame_alternate()
             else:
                 print(f"[FETCH] Error: HTTP {response.status_code}")
@@ -336,46 +334,50 @@ class TronbytClient:
                 
         except Exception as e:
             print(f"[FETCH] Error fetching frame: {e}")
-            # Try alternate URL format on first failure
             return self._fetch_frame_alternate()
     
     def _fetch_frame_alternate(self):
-        """Try alternate API endpoint format."""
+        """Try alternate API endpoint formats."""
         import urequests as requests
         
-        # Try /api/v1/devices/{id}/next format
-        url = f"{self.server_url}/api/v1/devices/{self.display_id}/next"
+        # Try /devices/{id}/next format
+        urls_to_try = [
+            f"{self.server_url}/devices/{self.display_id}/next",
+            f"{self.server_url}/api/v1/devices/{self.display_id}/next",
+        ]
         
         headers = {}
         if self.api_key:
-            headers['Authorization'] = f'Bearer {self.api_key}'
+            headers['Authorization'] = self.api_key
         
-        if DEBUG:
-            print(f"[FETCH] Trying alternate URL: {url}")
-        
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
+        for url in urls_to_try:
+            if DEBUG:
+                print(f"[FETCH] Trying: {url}")
             
-            if response.status_code == 200:
-                dwell_secs = int(response.headers.get('Tronbyt-Dwell-Secs', '15'))
-                brightness = int(response.headers.get('Tronbyt-Brightness', '-1'))
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
                 
-                if brightness >= 0:
-                    self.set_brightness(brightness)
-                
-                content_type = response.headers.get('Content-Type', '')
-                
+                if response.status_code == 200:
+                    dwell_secs = int(response.headers.get('Tronbyt-Dwell-Secs', '15'))
+                    brightness = int(response.headers.get('Tronbyt-Brightness', '-1'))
+                    
+                    if brightness >= 0:
+                        self.set_brightness(brightness)
+                    
+                    content_type = response.headers.get('Content-Type', '')
+                    
+                    if DEBUG:
+                        print(f"[FETCH] Success with: {url}")
+                    
+                    return response.content, dwell_secs, content_type
+                    
+            except Exception as e:
                 if DEBUG:
-                    print(f"[FETCH] Got frame from alternate endpoint")
-                
-                return response.content, dwell_secs, content_type
-            else:
-                print(f"[FETCH] Alternate URL also failed: HTTP {response.status_code}")
-                return None, 15, None
-                
-        except Exception as e:
-            print(f"[FETCH] Alternate URL error: {e}")
-            return None, 15, None
+                    print(f"[FETCH] Failed: {e}")
+                continue
+        
+        print(f"[FETCH] All endpoints failed")
+        return None, 15, None
     
     def decode_and_display(self, webp_data):
         """Decode WebP data and display on matrix."""
