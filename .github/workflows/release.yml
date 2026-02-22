@@ -49,6 +49,8 @@ jobs:
       
       - name: Prepare build environment
         run: |
+          # Link Pimoroni board definitions into MicroPython
+          cp -r $GITHUB_WORKSPACE/pimoroni-pico/micropython/boards/* micropython/ports/rp2/boards/
           cd micropython/ports/rp2
           make submodules
       
