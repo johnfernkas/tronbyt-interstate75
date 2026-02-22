@@ -60,8 +60,7 @@ jobs:
           make BOARD=i75w_rp2350 \
                USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.cmake \
                FROZEN_MANIFEST=$GITHUB_WORKSPACE/interstate75/boards/i75w_rp2350/manifest.py
-          cd build-i75w_rp2350
-          mv firmware.uf2 tronbyt-rp2350-64x32.uf2
+          mv build-i75w_rp2350/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-64x32.uf2
         env:
           GITHUB_WORKSPACE: ${{ github.workspace }}
       
@@ -76,8 +75,7 @@ jobs:
           make BOARD=i75w_rp2350 \
                USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.cmake \
                FROZEN_MANIFEST=$GITHUB_WORKSPACE/interstate75/boards/i75w_rp2350/manifest.py
-          cd build-i75w_rp2350
-          mv firmware.uf2 tronbyt-rp2350-64x64.uf2
+          mv build-i75w_rp2350/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-64x64.uf2
         env:
           GITHUB_WORKSPACE: ${{ github.workspace }}
       
@@ -130,8 +128,8 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
-            micropython/ports/rp2/build-i75w_rp2350/tronbyt-rp2350-64x32.uf2
-            micropython/ports/rp2/build-i75w_rp2350/tronbyt-rp2350-64x64.uf2
+            tronbyt-rp2350-64x32.uf2
+            tronbyt-rp2350-64x64.uf2
           body_path: release_notes.md
           draft: false
           prerelease: false
@@ -142,4 +140,4 @@ jobs:
         run: |
           echo "🎉 Release created successfully!"
           echo "📦 Firmware files uploaded:"
-          ls -lh micropython/ports/rp2/build-i75w_rp2350/*.uf2
+          ls -lh tronbyt-rp2350-*.uf2
