@@ -288,80 +288,145 @@ class TronbytClient:
             return status_config[0]
     
     def fetch_frame(self):
-        """Fetch a frame from the Tronbyt server."""
-        import urequests as requests
+        """Fetch a frame from the Tronbyt server using raw sockets."""
+        import socket
         
         # Parse server URL to handle ports properly
-        # urequests has issues with URLs containing ports
         server = self.server_url.replace('http://', '').replace('https://', '')
         if '/' in server:
             server = server.split('/')[0]
         
-        # Build the path
+        # Split host and port
+        if ':' in server:
+            host, port = server.split(':')
+            port = int(port)
+        else:
+            host = server
+            port = 80
+        
         path = f"/v0/devices/{self.display_id}/next"
         
-        # Construct full URL manually to avoid parsing issues
-        if ':8000' in self.server_url or ':80' in self.server_url:
-            # Explicit port in URL - use http
-            url = f"http://{server}{path}"
-        else:
-            # No port specified
-            url = f"http://{server}{path}"
-        
-        # Prepare headers with API key - Tronbyt uses raw key, not Bearer format
-        headers = {}
-        if self.api_key:
-            headers['Authorization'] = self.api_key
-        
         if DEBUG:
-            print(f"[FETCH] Server: {server}")
+            print(f"[FETCH] Host: {host}, Port: {port}")
             print(f"[FETCH] Path: {path}")
-            print(f"[FETCH] Full URL: {url}")
             print(f"[FETCH] API Key present: {'Yes' if self.api_key else 'No'}")
         
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            # Create socket and connect
+            addr = socket.getaddrinfo(host, port)[0][-1]
+            s = socket.socket()
+            s.settimeout(10)
+            s.connect(addr)
             
-            if response.status_code == 200:
-                # Get metadata from headers
-                dwell_secs = int(response.headers.get('Tronbyt-Dwell-Secs', '15'))
-                brightness = int(response.headers.get('Tronbyt-Brightness', '-1'))
+            # Build HTTP request
+            request_lines = [
+                f"GET {path} HTTP/1.1",
+                f"Host: {host}:{port}",
+                "Connection: close",
+            ]
+            
+            if self.api_key:
+                request_lines.append(f"Authorization: {self.api_key}")
+            
+            request_lines.append("")  # Empty line before body
+            request = "\r\n".join(request_lines) + "\r\n"
+            
+            if DEBUG:
+                print(f"[FETCH] Sending request...")
+            
+            s.send(request.encode())
+            
+            # Receive response
+            response = b""
+            while True:
+                try:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+                except:
+                    break
+            
+            s.close()
+            
+            # Parse response
+            header_end = response.find(b"\r\n\r\n")
+            if header_end == -1:
+                print("[FETCH] Invalid HTTP response")
+                return None, 15, None
+            
+            headers_bytes = response[:header_end]
+            body = response[header_end + 4:]
+            
+            # Parse status line
+            header_lines = headers_bytes.decode('utf-8', 'ignore').split("\r\n")
+            status_line = header_lines[0]
+            
+            if DEBUG:
+                print(f"[FETCH] Status: {status_line}")
+            
+            # Extract status code
+            parts = status_line.split()
+            if len(parts) < 2:
+                print("[FETCH] Invalid status line")
+                return None, 15, None
+            
+            try:
+                status_code = int(parts[1])
+            except:
+                print("[FETCH] Could not parse status code")
+                return None, 15, None
+            
+            if status_code == 200:
+                # Parse headers
+                headers = {}
+                for line in header_lines[1:]:
+                    if ':' in line:
+                        key, value = line.split(':', 1)
+                        headers[key.strip().lower()] = value.strip()
+                
+                dwell_secs = int(headers.get('tronbyt-dwell-secs', '15'))
+                brightness = int(headers.get('tronbyt-brightness', '-1'))
                 
                 if brightness >= 0:
                     self.set_brightness(brightness)
                 
-                content_type = response.headers.get('Content-Type', '')
-                
                 if DEBUG:
-                    print(f"[FETCH] Got frame: {len(response.content)} bytes, dwell={dwell_secs}s")
+                    print(f"[FETCH] Got frame: {len(body)} bytes, dwell={dwell_secs}s")
                 
-                return response.content, dwell_secs, content_type
-            elif response.status_code == 401:
+                return body, dwell_secs, headers.get('content-type', '')
+                
+            elif status_code == 401:
                 print(f"[FETCH] Error: Authentication failed (401)")
-                print(f"[FETCH] Check your DEVICE_API_KEY in config")
                 return None, 15, None
-            elif response.status_code == 404:
+            elif status_code == 404:
                 print(f"[FETCH] Error: Endpoint not found (404)")
-                print(f"[FETCH] Trying alternate endpoints...")
                 return self._fetch_frame_alternate()
             else:
-                print(f"[FETCH] Error: HTTP {response.status_code}")
+                print(f"[FETCH] Error: HTTP {status_code}")
                 return None, 15, None
                 
         except Exception as e:
-            print(f"[FETCH] Error fetching frame: {e}")
+            print(f"[FETCH] Error: {e}")
             import sys
             sys.print_exception(e)
             return self._fetch_frame_alternate()
     
     def _fetch_frame_alternate(self):
-        """Try alternate API endpoint formats."""
-        import urequests as requests
+        """Try alternate API endpoint formats using raw sockets."""
+        import socket
         
         # Parse server URL
         server = self.server_url.replace('http://', '').replace('https://', '')
         if '/' in server:
             server = server.split('/')[0]
+        
+        if ':' in server:
+            host, port = server.split(':')
+            port = int(port)
+        else:
+            host = server
+            port = 80
         
         # Try different paths
         paths_to_try = [
@@ -369,32 +434,78 @@ class TronbytClient:
             f"/api/v1/devices/{self.display_id}/next",
         ]
         
-        headers = {}
-        if self.api_key:
-            headers['Authorization'] = self.api_key
-        
         for path in paths_to_try:
-            url = f"http://{server}{path}"
-            
             if DEBUG:
-                print(f"[FETCH] Trying: {url}")
+                print(f"[FETCH] Trying path: {path}")
             
             try:
-                response = requests.get(url, headers=headers, timeout=10)
+                addr = socket.getaddrinfo(host, port)[0][-1]
+                s = socket.socket()
+                s.settimeout(10)
+                s.connect(addr)
                 
-                if response.status_code == 200:
-                    dwell_secs = int(response.headers.get('Tronbyt-Dwell-Secs', '15'))
-                    brightness = int(response.headers.get('Tronbyt-Brightness', '-1'))
+                request_lines = [
+                    f"GET {path} HTTP/1.1",
+                    f"Host: {host}:{port}",
+                    "Connection: close",
+                ]
+                
+                if self.api_key:
+                    request_lines.append(f"Authorization: {self.api_key}")
+                
+                request_lines.append("")
+                request = "\r\n".join(request_lines) + "\r\n"
+                
+                s.send(request.encode())
+                
+                response = b""
+                while True:
+                    try:
+                        chunk = s.recv(4096)
+                        if not chunk:
+                            break
+                        response += chunk
+                    except:
+                        break
+                
+                s.close()
+                
+                header_end = response.find(b"\r\n\r\n")
+                if header_end == -1:
+                    continue
+                
+                headers_bytes = response[:header_end]
+                body = response[header_end + 4:]
+                
+                header_lines = headers_bytes.decode('utf-8', 'ignore').split("\r\n")
+                status_line = header_lines[0]
+                parts = status_line.split()
+                
+                if len(parts) < 2:
+                    continue
+                
+                try:
+                    status_code = int(parts[1])
+                except:
+                    continue
+                
+                if status_code == 200:
+                    headers = {}
+                    for line in header_lines[1:]:
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            headers[key.strip().lower()] = value.strip()
+                    
+                    dwell_secs = int(headers.get('tronbyt-dwell-secs', '15'))
+                    brightness = int(headers.get('tronbyt-brightness', '-1'))
                     
                     if brightness >= 0:
                         self.set_brightness(brightness)
                     
-                    content_type = response.headers.get('Content-Type', '')
-                    
                     if DEBUG:
-                        print(f"[FETCH] Success with: {url}")
+                        print(f"[FETCH] Success with path: {path}")
                     
-                    return response.content, dwell_secs, content_type
+                    return body, dwell_secs, headers.get('content-type', '')
                     
             except Exception as e:
                 if DEBUG:
