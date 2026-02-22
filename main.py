@@ -291,8 +291,22 @@ class TronbytClient:
         """Fetch a frame from the Tronbyt server."""
         import urequests as requests
         
-        # Try the /next endpoint first (for scheduled frames)
-        url = f"{self.server_url}/v0/devices/{self.display_id}/next"
+        # Parse server URL to handle ports properly
+        # urequests has issues with URLs containing ports
+        server = self.server_url.replace('http://', '').replace('https://', '')
+        if '/' in server:
+            server = server.split('/')[0]
+        
+        # Build the path
+        path = f"/v0/devices/{self.display_id}/next"
+        
+        # Construct full URL manually to avoid parsing issues
+        if ':8000' in self.server_url or ':80' in self.server_url:
+            # Explicit port in URL - use http
+            url = f"http://{server}{path}"
+        else:
+            # No port specified
+            url = f"http://{server}{path}"
         
         # Prepare headers with API key - Tronbyt uses raw key, not Bearer format
         headers = {}
@@ -300,7 +314,9 @@ class TronbytClient:
             headers['Authorization'] = self.api_key
         
         if DEBUG:
-            print(f"[FETCH] Fetching frame from: {url}")
+            print(f"[FETCH] Server: {server}")
+            print(f"[FETCH] Path: {path}")
+            print(f"[FETCH] Full URL: {url}")
             print(f"[FETCH] API Key present: {'Yes' if self.api_key else 'No'}")
         
         try:
@@ -334,23 +350,32 @@ class TronbytClient:
                 
         except Exception as e:
             print(f"[FETCH] Error fetching frame: {e}")
+            import sys
+            sys.print_exception(e)
             return self._fetch_frame_alternate()
     
     def _fetch_frame_alternate(self):
         """Try alternate API endpoint formats."""
         import urequests as requests
         
-        # Try /devices/{id}/next format
-        urls_to_try = [
-            f"{self.server_url}/devices/{self.display_id}/next",
-            f"{self.server_url}/api/v1/devices/{self.display_id}/next",
+        # Parse server URL
+        server = self.server_url.replace('http://', '').replace('https://', '')
+        if '/' in server:
+            server = server.split('/')[0]
+        
+        # Try different paths
+        paths_to_try = [
+            f"/devices/{self.display_id}/next",
+            f"/api/v1/devices/{self.display_id}/next",
         ]
         
         headers = {}
         if self.api_key:
             headers['Authorization'] = self.api_key
         
-        for url in urls_to_try:
+        for path in paths_to_try:
+            url = f"http://{server}{path}"
+            
             if DEBUG:
                 print(f"[FETCH] Trying: {url}")
             
