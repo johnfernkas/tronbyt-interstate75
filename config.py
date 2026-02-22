@@ -8,6 +8,7 @@ WIFI_PASSWORD = "YourWiFiPassword"
 # Tronbyt Server Configuration
 TRONBYT_SERVER_URL = "http://192.168.1.100:8000"  # Your Tronbyt server address
 DISPLAY_ID = "rp2350-001"  # Unique identifier for this display
+DEVICE_API_KEY = ""  # Device API key from Tronbyt server (optional but recommended)
 
 # Display Configuration
 # Common sizes: 64x32, 64x64, 128x32, 128x64

@@ -123,6 +123,7 @@ class TronbytClient:
         
         self.display_id = DISPLAY_ID
         self.server_url = TRONBYT_SERVER_URL.rstrip('/')
+        self.api_key = DEVICE_API_KEY if 'DEVICE_API_KEY' in globals() else ""
         self.current_brightness = DEFAULT_BRIGHTNESS
         self.width = DISPLAY_WIDTH
         self.height = DISPLAY_HEIGHT
@@ -290,13 +291,21 @@ class TronbytClient:
         """Fetch a frame from the Tronbyt server."""
         import urequests as requests
         
-        url = f"{self.server_url}/next"
+        # Build URL with device ID - Tronbyt API format
+        # Try common patterns: /devices/{id}/next or /api/v1/devices/{id}/next
+        url = f"{self.server_url}/devices/{self.display_id}/next"
+        
+        # Prepare headers with API key if available
+        headers = {}
+        if self.api_key:
+            headers['Authorization'] = f'Bearer {self.api_key}'
         
         if DEBUG:
             print(f"[FETCH] Fetching frame from: {url}")
+            print(f"[FETCH] Headers: {headers if self.api_key else 'No API key'}")
         
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 # Get metadata from headers
@@ -312,12 +321,60 @@ class TronbytClient:
                     print(f"[FETCH] Got frame: {len(response.content)} bytes, dwell={dwell_secs}s")
                 
                 return response.content, dwell_secs, content_type
+            elif response.status_code == 401:
+                print(f"[FETCH] Error: Authentication failed (401)")
+                print(f"[FETCH] Check your DEVICE_API_KEY in config")
+                return None, 15, None
+            elif response.status_code == 404:
+                print(f"[FETCH] Error: Device not found (404)")
+                print(f"[FETCH] Check DISPLAY_ID matches registered device")
+                # Try alternate URL format
+                return self._fetch_frame_alternate()
             else:
                 print(f"[FETCH] Error: HTTP {response.status_code}")
                 return None, 15, None
                 
         except Exception as e:
             print(f"[FETCH] Error fetching frame: {e}")
+            # Try alternate URL format on first failure
+            return self._fetch_frame_alternate()
+    
+    def _fetch_frame_alternate(self):
+        """Try alternate API endpoint format."""
+        import urequests as requests
+        
+        # Try /api/v1/devices/{id}/next format
+        url = f"{self.server_url}/api/v1/devices/{self.display_id}/next"
+        
+        headers = {}
+        if self.api_key:
+            headers['Authorization'] = f'Bearer {self.api_key}'
+        
+        if DEBUG:
+            print(f"[FETCH] Trying alternate URL: {url}")
+        
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                dwell_secs = int(response.headers.get('Tronbyt-Dwell-Secs', '15'))
+                brightness = int(response.headers.get('Tronbyt-Brightness', '-1'))
+                
+                if brightness >= 0:
+                    self.set_brightness(brightness)
+                
+                content_type = response.headers.get('Content-Type', '')
+                
+                if DEBUG:
+                    print(f"[FETCH] Got frame from alternate endpoint")
+                
+                return response.content, dwell_secs, content_type
+            else:
+                print(f"[FETCH] Alternate URL also failed: HTTP {response.status_code}")
+                return None, 15, None
+                
+        except Exception as e:
+            print(f"[FETCH] Alternate URL error: {e}")
             return None, 15, None
     
     def decode_and_display(self, webp_data):
