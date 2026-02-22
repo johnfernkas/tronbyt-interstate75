@@ -12,124 +12,249 @@ on:
 
 jobs:
   build-and-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     permissions:
       contents: write
     
+    strategy:
+      matrix:
+        include:
+          - board: "i75w_rp2350"
+            display_size: "64x32"
+          - board: "i75w_rp2350"
+            display_size: "64x64"
+    
+    env:
+      MICROPYTHON_VERSION: "master"
+      PIMORONI_PICO_VERSION: "feature/picovector2-and-layers"
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          path: tronbyt-rp2350
-      
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential git
+          sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential git ccache python3-pip
+      
+      - name: Install Arm GNU Toolchain
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '14.2.Rel1'
+      
+      - name: Checkout Tronbyt RP2350
+        uses: actions/checkout@v4
+        with:
+          path: tronbyt-rp2350
       
       - name: Checkout MicroPython
         uses: actions/checkout@v4
         with:
           repository: micropython/micropython
-          ref: master
+          ref: ${{ env.MICROPYTHON_VERSION }}
           path: micropython
           submodules: recursive
       
-      - name: Checkout Pimoroni Interstate 75 Board Definitions
+      - name: Checkout Pimoroni Pico Libraries
+        uses: actions/checkout@v4
+        with:
+          repository: pimoroni/pimoroni-pico
+          ref: ${{ env.PIMORONI_PICO_VERSION }}
+          path: pimoroni-pico
+          submodules: true
+      
+      - name: Checkout Pimoroni Interstate75
         uses: actions/checkout@v4
         with:
           repository: pimoroni/interstate75
           path: interstate75
+          submodules: true
       
       - name: Build mpy-cross
         run: |
           cd micropython/mpy-cross
-          make
+          make -j$(nproc)
       
-      - name: Prepare build environment
+      - name: Create webpdec usermod.cmake
         run: |
-          # Link Pimoroni Interstate 75 board definitions into MicroPython
-          cp -r $GITHUB_WORKSPACE/interstate75/boards/* micropython/ports/rp2/boards/
-          cd micropython/ports/rp2
-          make submodules
+          cat > $GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/usermod.cmake << 'EOF'
+          add_library(usermod_webpdec INTERFACE)
+          target_sources(usermod_webpdec INTERFACE
+              ${CMAKE_CURRENT_LIST_DIR}/webpdec.c
+          )
+          target_include_directories(usermod_webpdec INTERFACE
+              ${CMAKE_CURRENT_LIST_DIR}
+          )
+          target_link_libraries(usermod INTERFACE usermod_webpdec)
+          EOF
       
-      - name: Build firmware for 64x32 display
+      - name: Prepare frozen modules
         run: |
-          cd micropython/ports/rp2
-          make BOARD=i75w_rp2350 \
-               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.cmake \
-               FROZEN_MANIFEST=$GITHUB_WORKSPACE/interstate75/boards/i75w_rp2350/manifest.py
-          mv build-i75w_rp2350/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-64x32.uf2
-        env:
-          GITHUB_WORKSPACE: ${{ github.workspace }}
+          MODULES_DIR=$GITHUB_WORKSPACE/tronbyt-rp2350/modules
+          mkdir -p $MODULES_DIR
+          
+          # Copy frozen modules
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/_boot.py $MODULES_DIR/
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/config.py $MODULES_DIR/
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/provisioning.py $MODULES_DIR/
+          
+          # Create frozen manifest using freeze() syntax
+          cat > $GITHUB_WORKSPACE/tronbyt-rp2350/frozen_manifest.py << EOF
+          include("\$(PORT_DIR)/boards/manifest.py")
+          try:
+              include("\$(PIMORONI_PICO_PATH)/micropython/modules/micropython-common-manifest.cmake")
+          except:
+              pass
+          freeze("$MODULES_DIR", "_boot.py")
+          freeze("$MODULES_DIR", "config.py")
+          freeze("$MODULES_DIR", "provisioning.py")
+          EOF
       
-      - name: Clean build directory
+      - name: Configure and build firmware
         run: |
-          cd micropython/ports/rp2
-          make BOARD=i75w_rp2350 clean
+          BOARD=${{ matrix.board }}
+          BOARD_DIR=$GITHUB_WORKSPACE/interstate75/boards/$BOARD
+          BUILD_DIR=$GITHUB_WORKSPACE/build-$BOARD
+          
+          mkdir -p $BUILD_DIR
+          
+          cmake -S $GITHUB_WORKSPACE/micropython/ports/rp2 -B $BUILD_DIR \
+            -DPICOTOOL_FORCE_FETCH_FROM_GIT=1 \
+            -DPICOTOOL_NO_PICOTOOL_TESTS=1 \
+            -DPICO_BUILD_DOCS=0 \
+            -DPICO_NO_COPRO_DIS=1 \
+            -DPIMORONI_PICO_PATH=$GITHUB_WORKSPACE/pimoroni-pico \
+            -DUSER_C_MODULES="$GITHUB_WORKSPACE/interstate75/boards/usermod-common.cmake;$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/usermod.cmake" \
+            -DMICROPY_BOARD_DIR=$BOARD_DIR \
+            -DMICROPY_BOARD=$BOARD \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DFROZEN_MANIFEST=$GITHUB_WORKSPACE/tronbyt-rp2350/frozen_manifest.py \
+            -DDISPLAY_SIZE=${{ matrix.display_size }}
+          
+          cmake --build $BUILD_DIR -j$(nproc)
+          
+          if [ -f "$BUILD_DIR/firmware.uf2" ]; then
+            cp $BUILD_DIR/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-${{ matrix.display_size }}.uf2
+          else
+            echo "❌ Firmware not found"
+            find $BUILD_DIR -name "*.uf2" -type f 2>/dev/null
+            exit 1
+          fi
       
-      - name: Build firmware for 64x64 display
+      - name: Create filesystem archive
         run: |
-          cd micropython/ports/rp2
-          make BOARD=i75w_rp2350 \
-               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.cmake \
-               FROZEN_MANIFEST=$GITHUB_WORKSPACE/interstate75/boards/i75w_rp2350/manifest.py
-          mv build-i75w_rp2350/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-64x64.uf2
-        env:
-          GITHUB_WORKSPACE: ${{ github.workspace }}
+          FS_DIR=$GITHUB_WORKSPACE/filesystem-${{ matrix.display_size }}
+          mkdir -p $FS_DIR
+          
+          # Copy main.py and boot.py for filesystem
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/main.py $FS_DIR/
+          
+          cat > $FS_DIR/boot.py << 'EOF'
+          # Filesystem boot.py - runs after frozen _boot.py
+          print("[FS-BOOT] Filesystem boot.py executing")
+          EOF
+          
+          # Create zip archive
+          cd $GITHUB_WORKSPACE
+          zip -r tronbyt-rp2350-filesystem-${{ matrix.display_size }}.zip filesystem-${{ matrix.display_size }}/
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.display_size }}
+          path: |
+            tronbyt-rp2350-${{ matrix.display_size }}.uf2
+            tronbyt-rp2350-filesystem-${{ matrix.display_size }}.zip
+          retention-days: 1
+
+  release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: firmware-*
+      
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -name "*.uf2" -o -name "*.zip"
       
       - name: Generate release notes
-        id: release_notes
         run: |
           cat > release_notes.md << 'EOF'
           ## Tronbyt RP2350 Firmware
-          
+
           ### 🎯 Pre-built MicroPython firmware with WebP decoding support
-          
+
           This release includes firmware binaries for the Pimoroni Interstate 75W (RP2350) with the custom `webpdec` module built-in.
-          
+
           ### 📦 Downloads
-          
+
+          #### Firmware (Required)
           - **tronbyt-rp2350-64x32.uf2** - For 64x32 HUB75 matrices
           - **tronbyt-rp2350-64x64.uf2** - For 64x64 HUB75 matrices
-          
+
+          #### Filesystem Files (Optional - for updates)
+          - **tronbyt-rp2350-filesystem-64x32.zip** - Contains main.py and boot.py for filesystem
+          - **tronbyt-rp2350-filesystem-64x64.zip** - Contains main.py and boot.py for filesystem
+
           ### 📋 Installation
-          
+
           1. Hold the **BOOT** button on your Interstate 75W
           2. Connect USB cable (while holding BOOT)
           3. Release BOOT - device appears as USB drive
           4. Copy the appropriate `.uf2` file to the drive
           5. Device will reboot automatically with new firmware
-          
+
           ### 🔧 Configuration
-          
-          After flashing firmware:
-          
-          1. Download `config.py` from this repository
-          2. Rename to `config_local.py`
-          3. Edit WiFi credentials and Tronbyt server URL
-          4. Upload `config_local.py` and `main.py` using Thonny or mpremote
-          
+
+          **First boot:** The device will start in provisioning mode:
+          - Connect to WiFi network: `Tronbyt-Setup`
+          - Password: `setup1234`
+          - Open browser and go to: `http://192.168.4.1`
+          - Enter your WiFi credentials and display settings
+
+          **Manual configuration:**
+          1. Create a `config_local.py` file with your settings
+          2. Upload via USB/Thonny/mpremote along with `main.py`
+
+          ### 📝 Boot Process
+
+          The firmware uses a two-stage boot process:
+          1. **Frozen `_boot.py`** - Mounts filesystem, then checks for filesystem `main.py`
+          2. **Filesystem `main.py`** - The main application (can be updated without reflashing)
+
+          ### 🔍 Debugging
+
+          Connect to serial console (115200 baud) to see detailed boot logs:
+          ```
+          picocom /dev/ttyACM0 -b 115200
+          ```
+
           ### ✨ What's Included
-          
+
           - MicroPython for RP2350
           - Custom `webpdec` C module for WebP decoding
           - Pimoroni Interstate 75 libraries
-          
+          - WiFi provisioning system
+          - Comprehensive debug output on serial
+
           ### 🐛 Issues?
-          
+
           Report bugs or issues at: https://github.com/johnfernkas/tronbyt-rp2350/issues
           EOF
-          echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
       
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
-            tronbyt-rp2350-64x32.uf2
-            tronbyt-rp2350-64x64.uf2
+            artifacts/**/*.uf2
+            artifacts/**/*.zip
           body_path: release_notes.md
           draft: false
           prerelease: false
@@ -139,5 +264,5 @@ jobs:
       - name: Release summary
         run: |
           echo "🎉 Release created successfully!"
-          echo "📦 Firmware files uploaded:"
-          ls -lh tronbyt-rp2350-*.uf2
+          echo "📦 Files uploaded:"
+          find artifacts -type f \( -name "*.uf2" -o -name "*.zip" \) -exec ls -lh {} \;

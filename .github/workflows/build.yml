@@ -85,45 +85,70 @@ jobs:
           target_link_libraries(usermod INTERFACE usermod_webpdec)
           EOF
       
-      - name: Prepare Python modules for freezing
+      - name: Prepare frozen modules
         run: |
-          # Create modules directory structure for freezing
+          # Create modules directory for frozen Python files
           MODULES_DIR=$GITHUB_WORKSPACE/tronbyt-rp2350/modules
           mkdir -p $MODULES_DIR
           
-          # Copy Python files to modules directory
+          # Copy Python files to modules directory for freezing
+          # _boot.py - frozen boot module that runs first
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/_boot.py $MODULES_DIR/
+          
+          # config.py - default configuration (frozen)
           cp $GITHUB_WORKSPACE/tronbyt-rp2350/config.py $MODULES_DIR/
+          
+          # provisioning.py - WiFi provisioning module (frozen)
           cp $GITHUB_WORKSPACE/tronbyt-rp2350/provisioning.py $MODULES_DIR/
-          cp $GITHUB_WORKSPACE/tronbyt-rp2350/main.py $MODULES_DIR/
           
-          # Create boot.py that runs our main module
-          cat > $MODULES_DIR/boot.py << 'EOF'
-          # Tronbyt RP2350 Boot Script
-          # This runs automatically on startup and launches the main application
+          # Create the frozen manifest using freeze() syntax
+          # freeze() is the correct function for frozen modules (not module())
+          cat > $GITHUB_WORKSPACE/tronbyt-rp2350/frozen_manifest.py << EOF
+          # Frozen module manifest
+          # Use freeze() for frozen modules, not module()
           
+          # Include base board manifest
+          include("\$(PORT_DIR)/boards/manifest.py")
+          
+          # Include Pimoroni modules if available
           try:
-              import main
-          except Exception as e:
-              import sys
-              print("Error starting Tronbyt:", e)
-              sys.print_exception(e)
+              include("\$(PIMORONI_PICO_PATH)/micropython/modules/micropython-common-manifest.cmake")
+          except:
+              pass
+          
+          # Freeze our modules
+          freeze("$MODULES_DIR", "_boot.py")
+          freeze("$MODULES_DIR", "config.py")
+          freeze("$MODULES_DIR", "provisioning.py")
           EOF
           
-          # Create a frozen manifest that includes our modules
-          # Use the directory path for the modules
-          cat > $GITHUB_WORKSPACE/tronbyt-rp2350/manifest.py << EOF
-          # Include the default manifest
-          include("$(PORT_DIR)/boards/manifest.py")
-          
-          # Freeze our application modules from the modules directory
-          module("$MODULES_DIR/boot.py")
-          module("$MODULES_DIR/config.py")
-          module("$MODULES_DIR/provisioning.py")
-          module("$MODULES_DIR/main.py")
-          EOF
-          
-          echo "✅ Python modules prepared for freezing"
+          echo "✅ Frozen modules prepared"
           ls -la $MODULES_DIR/
+          echo ""
+          echo "Manifest content:"
+          cat $GITHUB_WORKSPACE/tronbyt-rp2350/frozen_manifest.py
+      
+      - name: Create filesystem image with main.py
+        run: |
+          # Create a LittleFS filesystem image containing main.py
+          # This allows main.py to be on the filesystem while other modules are frozen
+          
+          FS_DIR=$GITHUB_WORKSPACE/tronbyt-rp2350/fs_contents
+          mkdir -p $FS_DIR
+          
+          # Copy main.py to filesystem
+          cp $GITHUB_WORKSPACE/tronbyt-rp2350/main.py $FS_DIR/
+          
+          # Create boot.py for filesystem (runs after frozen _boot.py)
+          cat > $FS_DIR/boot.py << 'EOF'
+          # Filesystem boot.py - runs after frozen _boot.py
+          # This file is optional - the frozen _boot.py handles launching main.py
+          print("[FS-BOOT] Filesystem boot.py executing")
+          print("[FS-BOOT] Main application should be started by frozen _boot.py")
+          EOF
+          
+          echo "✅ Filesystem contents prepared:"
+          ls -la $FS_DIR/
       
       - name: Configure build
         run: |
@@ -133,13 +158,15 @@ jobs:
           
           echo "Building for board: $BOARD"
           echo "Board directory: $BOARD_DIR"
+          echo "Display size: ${{ matrix.display_size }}"
           
           # Create build directory
           mkdir -p $BUILD_DIR
           
-          # Configure with cmake - combining Interstate75 modules with webpdec
+          # Configure with cmake
           cmake -S $GITHUB_WORKSPACE/micropython/ports/rp2 -B $BUILD_DIR \
             -DPICOTOOL_FORCE_FETCH_FROM_GIT=1 \
+            -DPICOTOOL_NO_PICOTOOL_TESTS=1 \
             -DPICO_BUILD_DOCS=0 \
             -DPICO_NO_COPRO_DIS=1 \
             -DPIMORONI_PICO_PATH=$GITHUB_WORKSPACE/pimoroni-pico \
@@ -148,8 +175,8 @@ jobs:
             -DMICROPY_BOARD=$BOARD \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DFROZEN_MANIFEST=$GITHUB_WORKSPACE/tronbyt-rp2350/manifest.py \
-            -DMICROPY_FROZEN_MANIFEST=$GITHUB_WORKSPACE/tronbyt-rp2350/manifest.py
+            -DFROZEN_MANIFEST=$GITHUB_WORKSPACE/tronbyt-rp2350/frozen_manifest.py \
+            -DDISPLAY_SIZE=${{ matrix.display_size }}
       
       - name: Build firmware
         run: |
@@ -159,8 +186,15 @@ jobs:
           # Build
           cmake --build $BUILD_DIR -j$(nproc)
           
-          # Rename output
-          cp $BUILD_DIR/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-${{ matrix.display_size }}.uf2
+          # Check if firmware was created
+          if [ -f "$BUILD_DIR/firmware.uf2" ]; then
+            echo "✅ Firmware built successfully"
+            cp $BUILD_DIR/firmware.uf2 $GITHUB_WORKSPACE/tronbyt-rp2350-${{ matrix.display_size }}.uf2
+          else
+            echo "❌ Firmware not found at expected location"
+            find $BUILD_DIR -name "*.uf2" -type f 2>/dev/null || echo "No .uf2 files found"
+            exit 1
+          fi
       
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -169,9 +203,21 @@ jobs:
           path: tronbyt-rp2350-${{ matrix.display_size }}.uf2
           retention-days: 30
       
+      - name: Upload filesystem contents artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tronbyt-rp2350-fs-${{ matrix.display_size }}
+          path: |
+            tronbyt-rp2350/fs_contents/main.py
+            tronbyt-rp2350/fs_contents/boot.py
+          retention-days: 30
+      
       - name: Display build info
         run: |
           echo "✅ Build completed successfully!"
           echo "Board: ${{ matrix.board }}"
           echo "Display: ${{ matrix.display_size }}"
-          ls -lh *.uf2
+          ls -lh *.uf2 || echo "No .uf2 files in workspace root"
+          echo ""
+          echo "Filesystem contents:"
+          ls -la $GITHUB_WORKSPACE/tronbyt-rp2350/fs_contents/
