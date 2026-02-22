@@ -50,7 +50,7 @@ jobs:
       - name: Prepare build environment
         run: |
           # Link Pimoroni Interstate 75 board definitions into MicroPython
-          cp -r $GITHUB_WORKSPACE/interstate75/boards/i75w_rp2350 micropython/ports/rp2/boards/I75W_RP2350
+          cp -r $GITHUB_WORKSPACE/interstate75/boards/* micropython/ports/rp2/boards/
           cd micropython/ports/rp2
           make submodules
       
@@ -58,7 +58,7 @@ jobs:
         run: |
           cd micropython/ports/rp2
           make BOARD=I75W_RP2350 \
-               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.mk \
+               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.cmake \
                FROZEN_MANIFEST=$GITHUB_WORKSPACE/interstate75/micropython/modules_py/interstate75.cmake
           cd build-I75W_RP2350
           mv firmware.uf2 tronbyt-rp2350-64x32.uf2
@@ -74,7 +74,7 @@ jobs:
         run: |
           cd micropython/ports/rp2
           make BOARD=I75W_RP2350 \
-               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.mk \
+               USER_C_MODULES=$GITHUB_WORKSPACE/tronbyt-rp2350/webpdec/micropython.cmake \
                FROZEN_MANIFEST=$GITHUB_WORKSPACE/interstate75/micropython/modules_py/interstate75.cmake
           cd build-I75W_RP2350
           mv firmware.uf2 tronbyt-rp2350-64x64.uf2
